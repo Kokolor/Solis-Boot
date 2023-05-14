@@ -25,9 +25,12 @@ typedef struct
 
 typedef struct
 {
-    void (*putRectangle)(int x, int y, int width, int height, uint32_t color);
-    void (*putPixel)(int x, int y, uint32_t color);
-} BOOTLOADER_INTERFACE;
+    void *baseAddress;
+    size_t bufferSize;
+    unsigned int width;
+    unsigned int height;
+    unsigned int pixelsPerScanLine;
+} FRAMEBUFFER;
 
 BOOT_ENTRY Entries[MAX_ENTRIES];
 UINTN EntryCount = 0;
@@ -76,45 +79,71 @@ size_t strlen(const char *str)
     return s - str;
 }
 
-void putPixel(int x, int y, uint32_t color)
-{
-    EFI_GRAPHICS_OUTPUT_BLT_PIXEL pixel;
+FRAMEBUFFER _framebuffer;
+FRAMEBUFFER* initGop(){
+	EFI_GUID gopGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
+	EFI_GRAPHICS_OUTPUT_PROTOCOL* gop;
+	EFI_STATUS status;
 
-    pixel.Red = (UINT8)((color >> 16) & 0xFF);
-    pixel.Green = (UINT8)((color >> 8) & 0xFF);
-    pixel.Blue = (UINT8)(color & 0xFF);
-    pixel.Reserved = 0;
+	status = uefi_call_wrapper(BS->LocateProtocol, 3, &gopGuid, NULL, (void**)&gop);
+	if(EFI_ERROR(status)){
+		Print(L"Unable to locate GOP\n\r");
+		return NULL;
+	}
+	else
+	{
+		Print(L"GOP located\n\r");
+	}
 
-    EFI_STATUS status = uefi_call_wrapper(
-        gop->Blt,
-        10,
-        gop,
-        &pixel,
-        EfiBltBufferToVideo,
-        0,
-        0,
-        x,
-        y,
-        1,
-        1,
-        0);
+	_framebuffer.baseAddress = (void*)gop->Mode->FrameBufferBase;
+	_framebuffer.bufferSize = gop->Mode->FrameBufferSize;
+	_framebuffer.width = gop->Mode->Info->HorizontalResolution;
+	_framebuffer.height = gop->Mode->Info->VerticalResolution;
+	_framebuffer.pixelsPerScanLine = gop->Mode->Info->PixelsPerScanLine;
 
-    if (EFI_ERROR(status))
-    {
-        Print(L"Failed to color the pixel\n");
-    }
+	return &_framebuffer;
+	
 }
 
-void putRectangle(int x, int y, int width, int height, uint32_t color)
-{
-    for (int i = y; i < y + height; i++)
-    {
-        for (int _i = x; _i < x + width; _i++)
-        {
-            putPixel(_i, i, color);
-        }
-    }
-}
+// void putPixel(int x, int y, uint32_t color)
+// {
+//     EFI_GRAPHICS_OUTPUT_BLT_PIXEL pixel;
+
+//     pixel.Red = (UINT8)((color >> 16) & 0xFF);
+//     pixel.Green = (UINT8)((color >> 8) & 0xFF);
+//     pixel.Blue = (UINT8)(color & 0xFF);
+//     pixel.Reserved = 0;
+
+//     EFI_STATUS status = uefi_call_wrapper(
+//         gop->Blt,
+//         10,
+//         gop,
+//         &pixel,
+//         EfiBltBufferToVideo,
+//         0,
+//         0,
+//         x,
+//         y,
+//         1,
+//         1,
+//         0);
+
+//     if (EFI_ERROR(status))
+//     {
+//         Print(L"Failed to color the pixel\n");
+//     }
+// }
+
+// void putRectangle(int x, int y, int width, int height, uint32_t color)
+// {
+//     for (int i = y; i < y + height; i++)
+//     {
+//         for (int _i = x; _i < x + width; _i++)
+//         {
+//             putPixel(_i, i, color);
+//         }
+//     }
+// }
 
 EFI_STATUS LoadPSF1Font(EFI_FILE_PROTOCOL *Root, CHAR16 *Path, PSF1_FONT *font)
 {
@@ -423,32 +452,31 @@ void showMenu(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
                 Print(L"Failed to load %s\n", Entries[CurrentSelection].Name);
                 continue;
             }
-            BOOTLOADER_INTERFACE bootloaderInterface;
-            bootloaderInterface.putRectangle = putRectangle;
-            bootloaderInterface.putPixel = putPixel;
-            PSF1_FONT *newFont;
-            LoadPSF1Font(Root, L"zap-light16.psf", newFont);
-            if (newFont == NULL)
+            FRAMEBUFFER *framebuffer = initGop();
+
+            Print(L"Base: 0x%x\n\rSize: 0x%x\n\rWidth: %d\n\rHeight: %d\n\rPixelsPerScanline: %d\n\r", framebuffer->baseAddress, framebuffer->bufferSize, framebuffer->width, framebuffer->height, framebuffer->pixelsPerScanLine);
+            PSF1_FONT *psfFont;
+            LoadPSF1Font(Root, L"zap-light16.psf", psfFont);
+            if (psfFont == NULL)
             {
                 Print(L"Font is not valid or is not found\n\r");
             }
             else
             {
-                Print(L"Font found. char size = %d\n\r", newFont->header->charsize);
+                Print(L"Font found: char size = %d\n\r", psfFont->header->charsize);
             }
-            int (*KernelStart)(BOOTLOADER_INTERFACE *, PSF1_FONT *) = (int (*)())EntryPoint;
+            // void (*KernelStart)(FRAMEBUFFER *, PSF1_FONT *) = (void (*)())EntryPoint;
+            void (*KernelStart)(FRAMEBUFFER *, PSF1_FONT *) = ((__attribute__((sysv_abi)) void (*)(FRAMEBUFFER *, PSF1_FONT *))EntryPoint);
 
-            KernelStart(&bootloaderInterface, newFont);
+            KernelStart(framebuffer, psfFont);
             break;
         }
         else if (Key.ScanCode == SCAN_DOWN)
         {
-            // Down arrow key pressed
             CurrentSelection = (CurrentSelection + 1) % EntryCount;
         }
         else if (Key.ScanCode == SCAN_UP)
         {
-            // Up arrow key pressed
             CurrentSelection = (CurrentSelection == 0) ? EntryCount - 1 : CurrentSelection - 1;
         }
     }

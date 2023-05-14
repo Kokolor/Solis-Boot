@@ -37,9 +37,9 @@ main.so \
 main.efi
 
 mkdir mnt
-qemu-img create lunar.img 1G
-mkfs.fat -n 'DISK' -s 2 -f 2 -R 32 lunar.img
-sudo losetup -P /dev/loop0 lunar.img
+qemu-img create solis.img 4G
+mkfs.fat -n 'DISK' -s 2 -f 2 -R 32 solis.img
+sudo losetup -P /dev/loop0 solis.img
 sudo mount /dev/loop0 mnt/
 sudo mkdir mnt/efi/
 sudo mkdir mnt/efi/boot/
@@ -52,7 +52,7 @@ cd ../src/
 sudo cp ../kernel/kernel.elf mnt/
 sudo umount mnt/
 sudo losetup -d /dev/loop0
-qemu-system-x86_64 -machine q35 -drive if=pflash,format=raw,readonly,file=/usr/share/edk2/x64/OVMF.fd -drive format=raw,file=lunar.img
-rm lunar.img
+qemu-system-x86_64 -machine q35 -drive if=pflash,format=raw,readonly,file=/usr/share/edk2/x64/OVMF.fd -drive format=raw,file=solis.img
+rm solis.img
 rmdir mnt
 rm main.so main.o main.efi ../kernel/kernel.o ../kernel/kernel.elf
